@@ -2,7 +2,11 @@ package com.example.city_gym_management_system;
 
 import com.twilio.Twilio;
 import com.twilio.rest.api.v2010.account.Message;
+import com.twilio.rest.api.v2010.account.MessageCreator;
 import com.twilio.type.PhoneNumber;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * WhatsApp Messaging Service using Twilio
@@ -18,8 +22,19 @@ import com.twilio.type.PhoneNumber;
  */
 public class WhatsAppService {
 
-    // Twilio WhatsApp Sandbox number (provided by Twilio)
-    private static final String TWILIO_WHATSAPP_NUMBER = "whatsapp:+14155238886";
+    // Set this in production to your WhatsApp-enabled Twilio sender number.
+    // The sandbox number is kept as a local fallback so development still works.
+    private static final String DEFAULT_TWILIO_WHATSAPP_NUMBER = "whatsapp:+14155238886";
+
+    // Template SIDs are optional during development. When they are set, the app sends
+    // approved WhatsApp templates for proactive messages.
+    private static final String TEMPLATE_WELCOME = "TWILIO_WHATSAPP_TEMPLATE_WELCOME";
+    private static final String TEMPLATE_PAYMENT_RECEIPT = "TWILIO_WHATSAPP_TEMPLATE_PAYMENT_RECEIPT";
+    private static final String TEMPLATE_PAYMENT_REMINDER = "TWILIO_WHATSAPP_TEMPLATE_PAYMENT_REMINDER";
+    private static final String TEMPLATE_MEMBERSHIP_EXPIRED = "TWILIO_WHATSAPP_TEMPLATE_MEMBERSHIP_EXPIRED";
+    private static final String TEMPLATE_BIRTHDAY_WISH = "TWILIO_WHATSAPP_TEMPLATE_BIRTHDAY_WISH";
+    private static final String TWILIO_MESSAGING_SERVICE_SID = "TWILIO_MESSAGING_SERVICE_SID";
+
     private static volatile boolean twilioReady = false;
     
     // Initialize Twilio with credentials from environment variables
@@ -77,7 +92,7 @@ public class WhatsAppService {
             // ✅ Send message using Twilio
             Message message = Message.creator(
                     new PhoneNumber(formattedPhone),        // To number (WhatsApp)
-                    new PhoneNumber(TWILIO_WHATSAPP_NUMBER), // From number (Twilio WhatsApp Sandbox)
+                    new PhoneNumber(getTwilioWhatsAppNumber()), // From number (sandbox or paid sender)
                     messageText                              // Message content
             ).create();
 
@@ -93,6 +108,31 @@ public class WhatsAppService {
             System.err.println("[WHATSAPP ERROR] Failed to send message to " + phoneNumber);
             System.err.println("[WHATSAPP ERROR] Error: " + e.getMessage());
             e.printStackTrace();
+            return false;
+        }
+    }
+
+    /**
+     * Send the welcome message after member registration.
+     */
+    public static boolean sendWelcomeMessage(String memberName, String phoneNumber) {
+        try {
+            if (memberName == null || memberName.trim().isEmpty()) {
+                System.err.println("[WHATSAPP ERROR] Member name is null or empty");
+                return false;
+            }
+
+            String fallbackText = String.format(
+                "*Welcome to City Gym*\n\nHello %s,\nYour member profile has been created successfully.\n\nWe are happy to have you with us.",
+                memberName
+            );
+
+            Map<String, String> variables = new LinkedHashMap<>();
+            variables.put("1", memberName);
+
+            return sendTemplateOrFallback(phoneNumber, TEMPLATE_WELCOME, fallbackText, variables);
+        } catch (Exception e) {
+            System.err.println("[WHATSAPP ERROR] Failed to send welcome message: " + e.getMessage());
             return false;
         }
     }
@@ -133,8 +173,7 @@ public class WhatsAppService {
             String safeStartDate = (startDate == null || startDate.trim().isEmpty()) ? "-" : startDate.trim();
             String safeEndDate = (endDate == null || endDate.trim().isEmpty()) ? "-" : endDate.trim();
 
-            // ✅ Format message with member details
-            String messageText = String.format(
+            String fallbackText = String.format(
                 "*City Gym - Payment Receipt*\n\n" +
                 "Hello %s,\n\n" +
                 "We have received your membership payment successfully.\n\n" +
@@ -147,7 +186,14 @@ public class WhatsAppService {
                 memberName, amount, membershipMonths, safeStartDate, safeEndDate
             );
 
-            return sendMessage(phoneNumber, messageText);
+            Map<String, String> variables = new LinkedHashMap<>();
+            variables.put("1", memberName);
+            variables.put("2", String.format("%.2f", amount));
+            variables.put("3", String.valueOf(membershipMonths));
+            variables.put("4", safeStartDate);
+            variables.put("5", safeEndDate);
+
+            return sendTemplateOrFallback(phoneNumber, TEMPLATE_PAYMENT_RECEIPT, fallbackText, variables);
 
         } catch (Exception e) {
             System.err.println("[WHATSAPP ERROR] Failed to send payment receipt: " + e.getMessage());
@@ -171,7 +217,7 @@ public class WhatsAppService {
                 return false;
             }
 
-            String messageText = String.format(
+            String fallbackText = String.format(
                 "*City Gym - Renewal Reminder*\n\n" +
                 "Hi %s,\n\n" +
                 "Your membership is due for renewal on %s.\n" +
@@ -181,7 +227,11 @@ public class WhatsAppService {
                 memberName, dueDate
             );
 
-            return sendMessage(phoneNumber, messageText);
+            Map<String, String> variables = new LinkedHashMap<>();
+            variables.put("1", memberName);
+            variables.put("2", dueDate);
+
+            return sendTemplateOrFallback(phoneNumber, TEMPLATE_PAYMENT_REMINDER, fallbackText, variables);
 
         } catch (Exception e) {
             System.err.println("[WHATSAPP ERROR] Failed to send payment reminder: " + e.getMessage());
@@ -204,8 +254,7 @@ public class WhatsAppService {
                 return false;
             }
 
-            // ✅ Format expired message
-            String messageText = String.format(
+            String fallbackText = String.format(
                 "*City Gym - Membership Expired*\n\n" +
                 "Hi %s,\n\n" +
                 "Your membership has expired.\n" +
@@ -216,7 +265,10 @@ public class WhatsAppService {
                 memberName
             );
 
-            return sendMessage(phoneNumber, messageText);
+            Map<String, String> variables = new LinkedHashMap<>();
+            variables.put("1", memberName);
+
+            return sendTemplateOrFallback(phoneNumber, TEMPLATE_MEMBERSHIP_EXPIRED, fallbackText, variables);
 
         } catch (Exception e) {
             System.err.println("[WHATSAPP ERROR] Failed to send expired notification: " + e.getMessage());
@@ -239,8 +291,7 @@ public class WhatsAppService {
                 return false;
             }
 
-            // ✅ Format birthday message
-            String messageText = String.format(
+            String fallbackText = String.format(
                 "*Happy Birthday from City Gym*\n\n" +
                 "Dear %s,\n\n" +
                 "Wishing you a healthy and joyful birthday.\n" +
@@ -249,7 +300,10 @@ public class WhatsAppService {
                 memberName
             );
 
-            return sendMessage(phoneNumber, messageText);
+            Map<String, String> variables = new LinkedHashMap<>();
+            variables.put("1", memberName);
+
+            return sendTemplateOrFallback(phoneNumber, TEMPLATE_BIRTHDAY_WISH, fallbackText, variables);
 
         } catch (Exception e) {
             System.err.println("[WHATSAPP ERROR] Failed to send birthday wish: " + e.getMessage());
@@ -298,6 +352,128 @@ public class WhatsAppService {
         }
 
         return "whatsapp:" + cleaned;
+    }
+
+    /**
+     * Resolve the WhatsApp sender number.
+     *
+     * In paid Twilio accounts, set TWILIO_WHATSAPP_NUMBER to your approved WhatsApp sender.
+     * For local testing, the sandbox number is used if the environment variable is missing.
+     */
+    private static String getTwilioWhatsAppNumber() {
+        String configuredNumber = System.getenv("TWILIO_WHATSAPP_NUMBER");
+        if (configuredNumber == null || configuredNumber.trim().isEmpty()) {
+            return DEFAULT_TWILIO_WHATSAPP_NUMBER;
+        }
+
+        String cleaned = configuredNumber.trim();
+        if (!cleaned.startsWith("whatsapp:")) {
+            cleaned = "whatsapp:" + cleaned;
+        }
+
+        return cleaned;
+    }
+
+    private static boolean sendTemplateOrFallback(
+            String phoneNumber,
+            String templateSidEnvVar,
+            String fallbackText,
+            Map<String, String> variables) {
+        String contentSid = readEnv(templateSidEnvVar);
+        String messagingServiceSid = readEnv(TWILIO_MESSAGING_SERVICE_SID);
+
+        if (contentSid == null || messagingServiceSid == null) {
+            if (contentSid == null) {
+                System.out.println("[WHATSAPP] Template SID not set for " + templateSidEnvVar + ", using fallback text.");
+            } else {
+                System.out.println("[WHATSAPP] Messaging Service SID not set, using fallback text for template " + templateSidEnvVar + ".");
+            }
+            return sendMessage(phoneNumber, fallbackText);
+        }
+
+        try {
+            if (!twilioReady) {
+                System.err.println("[WHATSAPP ERROR] Twilio is not initialized. Check environment variables.");
+                return false;
+            }
+
+            String formattedPhone = normalizeWhatsAppNumber(phoneNumber);
+            if (formattedPhone == null) {
+                System.err.println("[WHATSAPP ERROR] Invalid phone number format: " + phoneNumber);
+                return false;
+            }
+
+            MessageCreator creator = Message.creator(
+                    new PhoneNumber(formattedPhone),
+                    new PhoneNumber(getTwilioWhatsAppNumber()),
+                    (String) null
+            )
+            .setMessagingServiceSid(messagingServiceSid)
+            .setContentSid(contentSid)
+            .setContentVariables(toJsonVariables(variables));
+
+            Message message = creator.create();
+
+            System.out.println("[WHATSAPP SUCCESS] Template sent to: " + formattedPhone);
+            System.out.println("[WHATSAPP SUCCESS] Template SID: " + contentSid);
+            System.out.println("[WHATSAPP SUCCESS] Message SID: " + message.getSid());
+            System.out.println("[WHATSAPP SUCCESS] Status: " + message.getStatus());
+
+            return true;
+        } catch (Exception e) {
+            System.err.println("[WHATSAPP ERROR] Failed to send template " + templateSidEnvVar + ": " + e.getMessage());
+            return false;
+        }
+    }
+
+    private static String readEnv(String name) {
+        String value = System.getenv(name);
+        if (value == null) {
+            return null;
+        }
+
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private static String toJsonVariables(Map<String, String> variables) {
+        StringBuilder builder = new StringBuilder("{");
+        boolean first = true;
+
+        for (Map.Entry<String, String> entry : variables.entrySet()) {
+            if (!first) {
+                builder.append(',');
+            }
+            first = false;
+            builder.append('"').append(escapeJson(entry.getKey())).append('"');
+            builder.append(':');
+            builder.append('"').append(escapeJson(entry.getValue())).append('"');
+        }
+
+        builder.append('}');
+        return builder.toString();
+    }
+
+    private static String escapeJson(String value) {
+        if (value == null) {
+            return "";
+        }
+
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            switch (ch) {
+                case '\\' -> builder.append("\\\\");
+                case '"' -> builder.append("\\\"");
+                case '\b' -> builder.append("\\b");
+                case '\f' -> builder.append("\\f");
+                case '\n' -> builder.append("\\n");
+                case '\r' -> builder.append("\\r");
+                case '\t' -> builder.append("\\t");
+                default -> builder.append(ch);
+            }
+        }
+        return builder.toString();
     }
 }
 

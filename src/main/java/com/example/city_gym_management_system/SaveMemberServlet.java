@@ -157,11 +157,9 @@ public class SaveMemberServlet extends HttpServlet {
             con.commit();
 
             if (whatsapp != null && !whatsapp.isBlank()) {
-                WhatsAppService.sendMessage(
+                WhatsAppService.sendWelcomeMessage(
+                        name,
                         whatsapp,
-                        String.format(
-                                "*Welcome to City Gym*\n\nHello %s,\nYour member profile has been created successfully.\n\nWe are happy to have you with us.",
-                                name)
                 );
             }
         } catch (SQLException e) {
